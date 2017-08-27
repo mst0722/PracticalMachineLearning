@@ -1,0 +1,183 @@
+---
+title: "PML Prediction Assignment"
+author: "Mary T."
+date: "August 28th, 2017"
+output:
+  html_document:
+    keep_md: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Goal
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and predict the manner in which they did the exercise, using the "classe" variable in the training set. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways: 
+. exactly according to the specification (Class A),
+. throwing the elbows to the front (Class B),
+. lifting the dumbbell only halfway (Class C),
+. lowering the dumbbell only halfway (Class D)
+. throwing the hips to the front (Class E).
+
+Other variables may be used for prediction. A report should be created describing how the model was built, how cross validation was used, what the expected out of sample error is, and why certain choices were made. The prediction model will also be used to predict 20 different test cases. 
+
+
+## Data Preprocessing
+
+Download and read the data.
+
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(e1071)
+
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./pml-training.csv"
+testFile  <- "./pml-testing.csv"
+
+download.file(trainUrl, destfile=trainFile, method="curl")
+download.file(testUrl, destfile=testFile, method="curl")
+
+trainRaw <- read.csv("./pml-training.csv")
+testRaw <- read.csv("./pml-testing.csv")
+
+dim(trainRaw)
+dim(testRaw)
+
+```
+The training data set contains 19622 observations and 160 variables.
+The testing data set contains 20 observations and 160 variables. 
+The "classe" variable in the training set is the outcome to predict.
+
+## Clean data
+
+Remove columns with NA missing values. 
+Remove columns that are meaningless to the prediction process.
+
+
+```{r}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0] 
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0] 
+
+classe <- trainRaw$classe
+trainRemove <- grepl("^X|user_name|timestamp|window|^max|^min|^ampl|^var|^avg|^stdd|^ske|^kurt", names(trainRaw))
+trainRaw <- trainRaw[, !trainRemove]
+trainNew <- trainRaw[, sapply(trainRaw, is.numeric)]
+trainNew$classe <- classe
+testRemove <- grepl("^X|user_name|timestamp|window|^max|^min|^ampl|^var|^avg|^stdd|^ske|^kurt", names(testRaw))
+testRaw <- testRaw[, !testRemove]
+testNew <- testRaw[, sapply(testRaw, is.numeric)]
+
+dim(trainNew)
+dim(testNew)
+
+```
+The new training data set now has 19622 observations and 53 variables.
+The new testing data set contains 20 observations and 53 variables. 
+
+## Data splitting
+
+Split the new training set into a training data set (70%) and a validation data set (30%). 
+The validation data set will be used to conduct cross-validation in future steps.
+
+```{r}
+set.seed(22519) 
+inTrain <- createDataPartition(trainNew$classe, p=0.70, list=F)
+trainData <- trainNew[inTrain, ]
+testData <- trainNew[-inTrain, ]
+
+```
+
+## Data Modeling
+
+Fit a predictive model using the Random Forest algorithm because it is able to classify large amounts of data with accuracy. Use the 5-fold cross validation when applying the algorithm.
+
+```{r}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+
+```
+
+Predict the performance of the model on the validation data set.
+
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+
+```
+
+The estimated accuracy of the model is 99.39%.
+The estimated out-of-sample error is 0.61%.
+
+
+## Predicting for Test Data Set
+
+Apply the model to the original testing data (remove the problem_id column first).
+```{r}
+result <- predict(modelRf, testNew[, -length(names(testNew))])
+result
+
+```
+
+Generate prediction result "problem_id_x.txt" files for the 20 test cases.  
+
+```{r}
+pml_write_files <- function(x){
+
+  n = length(x)
+
+  for(i in 1:n){
+
+    filename = paste0("problem_id_",i,".txt")
+
+    write.table(x[i], file=filename, quote=FALSE,
+
+                row.names=FALSE, col.names=FALSE)
+
+  }
+
+}
+
+pml_write_files(result)
+
+```
+
+
+# ........................................................................................
+# ........................................................................................
+## Appendix
+
+## Correlation Matrix
+
+```{r}
+corrMatrixPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrMatrixPlot, method="color")
+
+```
+
+## Decision Tree Visualization
+
+```{r}
+dtreeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(dtreeModel) 
+
+```
